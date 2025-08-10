@@ -1,0 +1,188 @@
+# remy c , August 7 , 2025 
+# for Aysha
+#--------------------------
+
+library(readxl)
+library(tidyverse)
+library(pheatmap)
+library(ggplot2)
+
+#  Aysha, Storey's fdr might give you less stringent values 
+
+#  crawford-howell
+crawford_ttest <- function(case_value, control_values) {
+  n <- length(control_values)
+  mean_controls <- mean(control_values, na.rm = TRUE)
+  sd_controls <- sd(control_values, na.rm = TRUE)
+  
+  t_value <- (case_value - mean_controls) / (sd_controls * sqrt((n + 1) / n))
+  df <- n - 1
+  p_value <- 2 * pt(-abs(t_value), df)
+  
+  return(list(
+    t = t_value,
+    df = df,
+    p = p_value,
+    mean_controls = mean_controls,
+    sd_controls = sd_controls,
+    n_controls = n
+  ))
+}
+
+# Load 
+file_path <- "/Users/rcohan/Downloads/Rs_Seed-to-target.xlsx"
+sheet <- "Left_OP"
+df <- read_excel(file_path, sheet = sheet) %>%
+  filter(!is.na(z))
+
+# separate patient and control 
+patient_df <- df %>% filter(Group == "CBS")
+control_df <- df %>% filter(Group == "HC")
+
+# parse rois
+df <- df %>%
+  mutate(
+    Seed_ROI = word(Seed, 1, sep = "_"),
+    Target_ROI = word(Seed, 2, sep = "_")
+  )
+
+# maybe get all unique rois?
+all_rois <- sort(unique(c(df$Seed_ROI, df$Target_ROI)))
+
+# reate empty roi2roi matrices 
+make_empty_matrix <- function(values = NA) {
+  mat <- matrix(values, nrow = length(all_rois), ncol = length(all_rois))
+  rownames(mat) <- colnames(mat) <- all_rois
+  return(mat)
+}
+
+patient_matrix <- make_empty_matrix()
+control_mean_matrix <- make_empty_matrix()
+difference_matrix <- make_empty_matrix()
+
+# fill matrices 
+for (i in 1:nrow(patient_df)) {
+  row <- patient_df[i, ]
+  seed_roi <- word(row$Seed, 1, sep = "_")
+  target_roi <- word(row$Seed, 2, sep = "_")
+  
+  z_patient <- row$z
+  z_controls <- control_df %>% filter(Seed == row$Seed) %>% pull(z)
+  z_mean <- mean(z_controls, na.rm = TRUE)
+  z_diff <- z_patient - z_mean
+  
+  patient_matrix[seed_roi, target_roi] <- round(z_patient, 2)
+  control_mean_matrix[seed_roi, target_roi] <- round(z_mean, 2)
+  difference_matrix[seed_roi, target_roi] <- round(z_diff, 2)
+}
+
+# matrix plotting fx (i dont ike tehse plot go for deviation plot at the end 
+plot_matrix <- function(mat, title, zlim = c(-1, 1)) {
+  display_vals <- ifelse(is.na(mat), "", format(mat, digits = 2))
+  pheatmap(mat,
+           cluster_rows = FALSE,
+           cluster_cols = FALSE,
+           color = colorRampPalette(c("blue", "white", "red"))(100),
+           main = title,
+           display_numbers = display_vals,
+           fontsize_number = 10,
+           breaks = seq(zlim[1], zlim[2], length.out = 101),
+           na_col = "grey90")
+}
+
+# ==== Plot matrices ====
+plot_matrix(patient_matrix, "Patient Connectivity")
+plot_matrix(control_mean_matrix, "Control Mean Connectivity")
+plot_matrix(difference_matrix, "Patient - Control Mean Difference")
+
+# ==== Run Crawford t-tests ====
+results <- data.frame(
+  ROI_Pair = character(),
+  z_patient = numeric(),
+  z_mean = numeric(),
+  z_sd = numeric(),
+  n = integer(),
+  t = numeric(),
+  p_uncorrected = numeric(),
+  stringsAsFactors = FALSE
+)
+
+for (seed in unique(df$Seed)) {
+  row_case <- patient_df %>% filter(Seed == seed)
+  z_patient <- row_case$z
+  z_controls <- control_df %>% filter(Seed == seed) %>% pull(z)
+  
+  test <- crawford_ttest(z_patient, z_controls)
+  
+  results <- rbind(results, data.frame(
+    ROI_Pair = seed,
+    z_patient = round(z_patient, 3),
+    z_mean = round(test$mean_controls, 3),
+    z_sd = round(test$sd_controls, 3),
+    n = test$n_controls,
+    t = round(test$t, 3),
+    p_uncorrected = round(test$p, 6)
+  ))
+}
+
+# FDR correction 
+if (use_storey) {
+  qobj <- qvalue::qvalue(results$p_uncorrected)
+  results$p_fdr <- round(qobj$qvalues, 6)
+} else {
+  results$p_fdr <- round(p.adjust(results$p_uncorrected, method = "BH"), 6)
+}
+
+# reorder and print nicely!!!
+results <- results %>%
+  arrange(p_fdr) %>%
+  select(
+    ROI_Pair, z_patient, z_mean, z_sd, n, t,
+    p_uncorrected, p_fdr
+  )
+
+# save & print
+#write_csv(results, "crawford_results.csv") in case you want the results to be saved
+print(knitr::kable(results, format = "simple", digits = 3))
+
+
+# this si my favourite polot which i think is more intuitive (if you can beautify it further)
+# Compute z_patient - z_mean (Δz) for each ROI pair
+delta_z_df <- df_cbs %>%
+  select(Seed, z_patient = z) %>%
+  left_join(
+    df_hc %>%
+      group_by(Seed) %>%
+      summarise(z_mean = mean(z), .groups = "drop"),
+    by = "Seed"
+  ) %>%
+  mutate(delta_z = z_patient - z_mean)
+
+# Split ROI_Pair into source and target (e.g., LOP_PCC → LOP + PCC)
+delta_z_df <- delta_z_df %>%
+  separate(Seed, into = c("Source", "Target"), sep = "_", remove = FALSE)
+
+# Create symmetrical matrix: one for rows, one for columns
+z_matrix <- delta_z_df %>%
+  select(Source, Target, delta_z) %>%
+  pivot_wider(names_from = Target, values_from = delta_z) %>%
+  column_to_rownames("Source") %>%
+  as.matrix()
+
+# Optional: make it symmetrical by copying upper triangle to lower
+z_matrix[lower.tri(z_matrix)] <- t(z_matrix)[lower.tri(z_matrix)]
+
+# Plot using ggplot heatmap
+z_long <- as.data.frame(as.table(z_matrix)) %>%
+  rename(Source = Var1, Target = Var2, delta_z = Freq)
+
+ggplot(z_long, aes(Source, Target, fill = delta_z)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white",
+                       midpoint = 0, limit = c(-1, 1), name = "Δz") +
+  theme_minimal(base_size = 10) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        panel.grid = element_blank()) +
+  coord_fixed() +
+  labs(title = "Z Deviation (Patient - Control Mean)", x = "", y = "")
+
