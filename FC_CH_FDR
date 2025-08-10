@@ -29,7 +29,7 @@ crawford_ttest <- function(case_value, control_values) {
   ))
 }
 
-# Load 
+# load 
 file_path <- "/Users/rcohan/Downloads/Rs_Seed-to-target.xlsx"
 sheet <- "Left_OP"
 df <- read_excel(file_path, sheet = sheet) %>%
@@ -49,7 +49,7 @@ df <- df %>%
 # maybe get all unique rois?
 all_rois <- sort(unique(c(df$Seed_ROI, df$Target_ROI)))
 
-# reate empty roi2roi matrices 
+# create empty roi2roi matrices 
 make_empty_matrix <- function(values = NA) {
   mat <- matrix(values, nrow = length(all_rois), ncol = length(all_rois))
   rownames(mat) <- colnames(mat) <- all_rois
