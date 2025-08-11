@@ -76,7 +76,7 @@ for (i in 1:nrow(patient_df)) {
   difference_matrix[seed_roi, target_roi] <- round(z_diff, 2)
 }
 
-# matrix plotting fx (i dont ike tehse plot go for deviation plot at the end 
+# matrix plotting fx (i dont ike these plots go for deviation plot at the end) 
 plot_matrix <- function(mat, title, zlim = c(-1, 1)) {
   display_vals <- ifelse(is.na(mat), "", format(mat, digits = 2))
   pheatmap(mat,
@@ -90,12 +90,12 @@ plot_matrix <- function(mat, title, zlim = c(-1, 1)) {
            na_col = "grey90")
 }
 
-# ==== Plot matrices ====
+# plot matrices
 plot_matrix(patient_matrix, "Patient Connectivity")
 plot_matrix(control_mean_matrix, "Control Mean Connectivity")
 plot_matrix(difference_matrix, "Patient - Control Mean Difference")
 
-# ==== Run Crawford t-tests ====
+# run Crawford t-tests 
 results <- data.frame(
   ROI_Pair = character(),
   z_patient = numeric(),
@@ -146,7 +146,7 @@ results <- results %>%
 print(knitr::kable(results, format = "simple", digits = 3))
 
 
-# this si my favourite polot which i think is more intuitive (if you can beautify it further)
+# this is my favourite polot which i think is more intuitive (if you can beautify it further)
 # Compute z_patient - z_mean (Δz) for each ROI pair
 delta_z_df <- df_cbs %>%
   select(Seed, z_patient = z) %>%
@@ -158,21 +158,21 @@ delta_z_df <- df_cbs %>%
   ) %>%
   mutate(delta_z = z_patient - z_mean)
 
-# Split ROI_Pair into source and target (e.g., LOP_PCC → LOP + PCC)
+# split ROI_pair into source and target (e.g., LOP_PCC → LOP + PCC)
 delta_z_df <- delta_z_df %>%
   separate(Seed, into = c("Source", "Target"), sep = "_", remove = FALSE)
 
-# Create symmetrical matrix: one for rows, one for columns
+# create symmetrical matrix: one for rows, one for columns
 z_matrix <- delta_z_df %>%
   select(Source, Target, delta_z) %>%
   pivot_wider(names_from = Target, values_from = delta_z) %>%
   column_to_rownames("Source") %>%
   as.matrix()
 
-# Optional: make it symmetrical by copying upper triangle to lower
+# optional: make it symmetrical by copying upper triangle to lower
 z_matrix[lower.tri(z_matrix)] <- t(z_matrix)[lower.tri(z_matrix)]
 
-# Plot using ggplot heatmap
+# plot using ggplot heatmap
 z_long <- as.data.frame(as.table(z_matrix)) %>%
   rename(Source = Var1, Target = Var2, delta_z = Freq)
 
